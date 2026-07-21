@@ -31,6 +31,7 @@ cd "$HRSSM_DIR"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate hrssm
 export MUJOCO_GL="${MUJOCO_GL:-osmesa}"   # override e.g. MUJOCO_GL=egl bash smoke_test.sh
+echo "==> Rendering backend: MUJOCO_GL=${MUJOCO_GL}  PYOPENGL_PLATFORM=${PYOPENGL_PLATFORM:-<unset>}"
 
 rm -rf "$LOGDIR"
 mkdir -p "$LOGDIR"

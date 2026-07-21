@@ -5,7 +5,7 @@ import pathlib
 import sys
 import json
 
-os.environ["MUJOCO_GL"] = "osmesa"
+os.environ.setdefault("MUJOCO_GL", "osmesa")
 
 import numpy as np
 import ruamel.yaml as yaml
