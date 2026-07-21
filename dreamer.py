@@ -278,32 +278,6 @@ def make_env(config, mode):
         env = wrappers.RewardObs(env)
     return env
 
-
-class LazyEnv:
-    """Defers env construction until first attribute access.
-
-    Passing an already-constructed env to Parallel makes it cloudpickle a
-    live object holding native MuJoCo physics/rendering handles across the
-    process boundary, which fails (handles aren't picklable, and the
-    wrapper chain's proxying __getattr__ recurses infinitely while
-    cloudpickle probes a partially-reconstructed instance). Passing this
-    instead defers the real make_env(...) call to happen inside the
-    subprocess, so nothing native ever needs to be pickled.
-    """
-
-    def __init__(self, make, mode):
-        self._make = make
-        self._mode = mode
-        self._env = None
-
-    def __getattr__(self, name):
-        if name.startswith("_"):
-            raise AttributeError(name)
-        if self._env is None:
-            self._env = self._make(self._mode)
-        return getattr(self._env, name)
-
-
 def main(config):
     tools.set_seed_everywhere(config.seed)
     if config.deterministic_run:
@@ -331,12 +305,12 @@ def main(config):
     train_eps = collections.OrderedDict()
     eval_eps = collections.OrderedDict()
     make = lambda mode: make_env(config, mode)
+    train_envs = [make("train") for _ in range(config.envs)]
+    eval_envs = [make("eval") for _ in range(config.envs)]
     if config.parallel:
-        train_envs = [Parallel(LazyEnv(make, "train"), "process") for _ in range(config.envs)]
-        eval_envs = [Parallel(LazyEnv(make, "eval"), "process") for _ in range(config.envs)]
+        train_envs = [Parallel(env, "process") for env in train_envs]
+        eval_envs = [Parallel(env, "process") for env in eval_envs]
     else:
-        train_envs = [make("train") for _ in range(config.envs)]
-        eval_envs = [make("eval") for _ in range(config.envs)]
         train_envs = [Damy(env) for env in train_envs]
         eval_envs = [Damy(env) for env in eval_envs]
     acts = train_envs[0].action_space
