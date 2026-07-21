@@ -1,0 +1,10 @@
+task,checkpoint_target,checkpoint_actual_grad_steps,eval_return_mean,eval_return_std,n_seeds
+walker_stand,100000,100099,911.36,0.00,1
+walker_stand,250000,112599,927.45,0.00,1
+walker_stand,500000,112599,927.45,0.00,1
+cheetah_run,100000,100099,482.21,0.00,1
+cheetah_run,250000,112599,466.17,0.00,1
+cheetah_run,500000,112599,466.17,0.00,1
+cartpole_swingup,100000,100099,738.94,0.00,1
+cartpole_swingup,250000,112599,737.88,0.00,1
+cartpole_swingup,500000,112599,737.88,0.00,1
