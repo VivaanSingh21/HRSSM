@@ -240,6 +240,10 @@ def simulate(
         reward = [0] * len(envs)
     else:
         step, episode, done, length, obs, agent_state, reward = state
+    # train-vs-env wall-clock split diagnostic (see RUNTIME_CHALLENGES.md #13/#14)
+    _train_time_baseline = getattr(agent, "_train_time_accum", None)
+    _env_time_window = 0.0
+    _loop_count = 0
     while (steps and step < steps) or (episodes and episode < episodes):
         # reset envs if necessary
         if done.any():
@@ -268,8 +272,10 @@ def simulate(
             action = np.array(action)
         assert len(action) == len(envs)
         # step envs
+        _t_env0 = time.perf_counter()
         results = [e.step(a) for e, a in zip(envs, action)]
         results = [r() for r in results]
+        _env_time_window += time.perf_counter() - _t_env0
         obs, reward, done = zip(*[p[:3] for p in results])
         obs = list(obs)
         reward = list(reward)
@@ -278,6 +284,22 @@ def simulate(
         length += 1
         step += len(envs)
         length *= 1 - done
+
+        # train-vs-env wall-clock split diagnostic (see RUNTIME_CHALLENGES.md #13/#14)
+        if not is_eval and _train_time_baseline is not None:
+            _loop_count += 1
+            if _loop_count % 100 == 0:
+                _train_time_now = agent._train_time_accum
+                _train_time_window = _train_time_now - _train_time_baseline
+                _total = _train_time_window + _env_time_window
+                if _total > 0:
+                    print(
+                        f"[timing] last {_loop_count if _loop_count <= 100 else 100} iters: "
+                        f"_train={_train_time_window:.2f}s ({100*_train_time_window/_total:.1f}%)  "
+                        f"env.step={_env_time_window:.2f}s ({100*_env_time_window/_total:.1f}%)"
+                    )
+                _train_time_baseline = _train_time_now
+                _env_time_window = 0.0
         # add to cache
         for a, result, env in zip(action, results, envs):
             o, r, d, info = result

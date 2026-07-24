@@ -4,6 +4,7 @@ import os
 import pathlib
 import sys
 import json
+import time
 
 os.environ.setdefault("MUJOCO_GL", "osmesa")
 
@@ -44,6 +45,8 @@ class Dreamer(nn.Module):
         self._step = logger.step // config.action_repeat
         self._update_count = 0
         self._dataset = dataset
+        # train-vs-env wall-clock split diagnostic (see RUNTIME_CHALLENGES.md #13/#14)
+        self._train_time_accum = 0.0
         self._wm = models.WorldModel(obs_space, act_space, self._step, config)
         self._task_behavior = models.ImagBehavior(
             config, self._wm, config.behavior_stop_grad
@@ -78,7 +81,9 @@ class Dreamer(nn.Module):
                 else self._should_train(step)
             )
             for _ in range(steps):
+                _t0 = time.perf_counter()
                 self._train(next(self._dataset))
+                self._train_time_accum += time.perf_counter() - _t0
                 self._update_count += 1
                 self._metrics["update_count"] = self._update_count
             if self._should_log(step):
