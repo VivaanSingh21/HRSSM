@@ -86,15 +86,24 @@ class Dreamer(nn.Module):
                 from torch.profiler import profile, ProfilerActivity
 
                 with profile(
-                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    with_stack=True,
+                    record_shapes=True,
                 ) as prof:
                     for _ in range(5):
                         self._train(next(self._dataset))
                         self._update_count += 1
                         self._metrics["update_count"] = self._update_count
+                print("=== flat op table ===")
                 print(
                     prof.key_averages().table(
                         sort_by="self_cpu_time_total", row_limit=25
+                    )
+                )
+                print("=== grouped by call stack (top 5 frames) ===")
+                print(
+                    prof.key_averages(group_by_stack_n=5).table(
+                        sort_by="self_cpu_time_total", row_limit=40
                     )
                 )
                 self._profiled_train = True
