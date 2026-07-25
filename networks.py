@@ -219,21 +219,24 @@ class RSSM(nn.Module):
         # otherwise, post use different network(_obs_out_layers) with prior[deter] and embed as inputs
         prev_action *= (1.0 / torch.clip(torch.abs(prev_action), min=1.0)).detach()
 
-        if torch.sum(is_first) > 0:
-            # TODO is_first[:, None] == is_first.unsqueeze(-1) ？？？
-            is_first = is_first.unsqueeze(-1)
-            prev_action *= 1.0 - is_first
-            init_state = self.initial(len(is_first))
-            if len(is_first.shape) >= 3:
-                init_state = {key : value.unsqueeze(1).expand_as(prev_state[key]) for key, value in init_state.items()}
-            for key, val in prev_state.items():
-                is_first_r = torch.reshape(
-                    is_first,
-                    is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
-                )
-                prev_state[key] = (
-                    val * (1.0 - is_first_r) + init_state[key] * is_first_r
-                )
+        # Unconditional, branch-free masked blend (was gated behind
+        # `if torch.sum(is_first) > 0:` — that Python-level branch forces a
+        # device-to-host sync every call to decide whether to skip work that's
+        # already a no-op when is_first is all-zero; see RUNTIME_CHALLENGES.md #15/#16).
+        # TODO is_first[:, None] == is_first.unsqueeze(-1) ？？？
+        is_first = is_first.unsqueeze(-1)
+        prev_action *= 1.0 - is_first
+        init_state = self.initial(len(is_first))
+        if len(is_first.shape) >= 3:
+            init_state = {key : value.unsqueeze(1).expand_as(prev_state[key]) for key, value in init_state.items()}
+        for key, val in prev_state.items():
+            is_first_r = torch.reshape(
+                is_first,
+                is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
+            )
+            prev_state[key] = (
+                val * (1.0 - is_first_r) + init_state[key] * is_first_r
+            )
 
         prior = self.img_step(prev_state, prev_action, None, sample)
         if self._shared:
@@ -259,20 +262,21 @@ class RSSM(nn.Module):
         # otherwise, post use different network(_obs_out_layers) with prior[deter] and embed as inputs
         prev_action *= (1.0 / torch.clip(torch.abs(prev_action), min=1.0)).detach()
 
-        if torch.sum(is_first) > 0:
-            is_first = is_first.unsqueeze(-1)
-            prev_action *= 1.0 - is_first
-            init_state = self.initial(len(is_first))
-            if len(is_first.shape) >= 3:
-                init_state = {key : value.unsqueeze(1).expand_as(prev_post[key]) for key, value in init_state.items()}
-            for key, val in prev_post.items():
-                is_first_r = torch.reshape(
-                    is_first,
-                    is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
-                )
-                prev_post[key] = (
-                    val * (1.0 - is_first_r) + init_state[key] * is_first_r
-                )
+        # Unconditional, branch-free masked blend — see note in obs_step()
+        # (RUNTIME_CHALLENGES.md #15/#16).
+        is_first = is_first.unsqueeze(-1)
+        prev_action *= 1.0 - is_first
+        init_state = self.initial(len(is_first))
+        if len(is_first.shape) >= 3:
+            init_state = {key : value.unsqueeze(1).expand_as(prev_post[key]) for key, value in init_state.items()}
+        for key, val in prev_post.items():
+            is_first_r = torch.reshape(
+                is_first,
+                is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
+            )
+            prev_post[key] = (
+                val * (1.0 - is_first_r) + init_state[key] * is_first_r
+            )
 
         # prior = self.img_step(prev_post, prev_action, None, sample)
         if self._shared:
@@ -293,18 +297,19 @@ class RSSM(nn.Module):
             true_post = {"stoch": stoch, "deter": now_prior["deter"], **stats}
         true_init_state = self.initial(len(is_first))
         true_prev_post = {key : torch.cat([true_init_state[key].unsqueeze(1), value], dim=1)[:, :-1] for key, value in true_post.items()}
-        if torch.sum(is_first) > 0:
-            init_state = self.initial(len(is_first))
-            if len(is_first.shape) >= 3:
-                init_state = {key : value.unsqueeze(1).expand_as(true_prev_post[key]) for key, value in init_state.items()}
-            for key, val in true_prev_post.items():
-                is_first_r = torch.reshape(
-                    is_first,
-                    is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
-                )
-                true_prev_post[key] = (
-                    val * (1.0 - is_first_r) + init_state[key] * is_first_r
-                )
+        # Unconditional, branch-free masked blend — see note in obs_step()
+        # (RUNTIME_CHALLENGES.md #15/#16).
+        init_state = self.initial(len(is_first))
+        if len(is_first.shape) >= 3:
+            init_state = {key : value.unsqueeze(1).expand_as(true_prev_post[key]) for key, value in init_state.items()}
+        for key, val in true_prev_post.items():
+            is_first_r = torch.reshape(
+                is_first,
+                is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
+            )
+            true_prev_post[key] = (
+                val * (1.0 - is_first_r) + init_state[key] * is_first_r
+            )
         true_prior = self.img_step(true_prev_post, prev_action, None, sample)
         return true_post, true_prior
     
