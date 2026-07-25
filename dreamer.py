@@ -47,6 +47,8 @@ class Dreamer(nn.Module):
         self._dataset = dataset
         # train-vs-env wall-clock split diagnostic (see RUNTIME_CHALLENGES.md #13/#14)
         self._train_time_accum = 0.0
+        # one-shot op-level CPU/CUDA profiling diagnostic (see RUNTIME_CHALLENGES.md #15)
+        self._profiled_train = False
         self._wm = models.WorldModel(obs_space, act_space, self._step, config)
         self._task_behavior = models.ImagBehavior(
             config, self._wm, config.behavior_stop_grad
@@ -80,6 +82,22 @@ class Dreamer(nn.Module):
                 if self._should_pretrain()
                 else self._should_train(step)
             )
+            if self._config.profile_train and not self._profiled_train and steps > 0:
+                from torch.profiler import profile, ProfilerActivity
+
+                with profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
+                ) as prof:
+                    for _ in range(5):
+                        self._train(next(self._dataset))
+                        self._update_count += 1
+                        self._metrics["update_count"] = self._update_count
+                print(
+                    prof.key_averages().table(
+                        sort_by="self_cpu_time_total", row_limit=25
+                    )
+                )
+                self._profiled_train = True
             for _ in range(steps):
                 _t0 = time.perf_counter()
                 self._train(next(self._dataset))
@@ -450,4 +468,5 @@ if __name__ == "__main__":
     parser.add_argument('--nomlr', action='store_true')
     parser.add_argument('--nosimsr', action='store_true')
     parser.add_argument('--post_mlr', action='store_true')
+    parser.add_argument('--profile_train', action='store_true')
     main(parser.parse_args(remaining))
