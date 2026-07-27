@@ -64,39 +64,21 @@ _ = rssm.obs_step(clone_state(prev_state), action.clone(), embed, is_first_mixed
 print("[PASS] obs_step: mixed is_first ran without error (shape/dim path exercised)")
 
 # --- Test 3: obs_step_by_prior, is_first all zero ---
-# Unlike obs_step (called per-timestep inside static_scan), obs_step_by_prior
-# is called ONCE per _train() with full (batch, time, ...) sequence tensors
-# (models.py:425: prev_post/prior come from dynamics.observe(), action/is_first
-# come straight from the training batch). Build inputs at that shape, not
-# obs_step's single-timestep shape.
-TIME = 5
-
-def make_time_state(batch, time_):
-    base = rssm.initial(batch)
-    state = {}
-    for k, v in base.items():
-        v_t = v.unsqueeze(1).repeat(1, time_, *([1] * (v.dim() - 1)))
-        state[k] = v_t + torch.randn_like(v_t) * 0.1
-    return state
-
-prev_post = make_time_state(BATCH, TIME)
-now_prior = make_time_state(BATCH, TIME)
-action_seq = torch.randn(BATCH, TIME, 6)
-embed_seq = torch.randn(BATCH, TIME, 128)
-is_first_zero_seq = torch.zeros(BATCH, TIME)
-is_first_mixed_seq = torch.zeros(BATCH, TIME)
-is_first_mixed_seq[0, 0] = 1.0
-is_first_mixed_seq[3, 2] = 1.0
-
+prev_post = rssm.initial(BATCH)
+for k in prev_post:
+    prev_post[k] = prev_post[k] + torch.randn_like(prev_post[k]) * 0.1
+now_prior = rssm.initial(BATCH)
+for k in now_prior:
+    now_prior[k] = now_prior[k] + torch.randn_like(now_prior[k]) * 0.1
 before_post = clone_state(prev_post)
 true_post, true_prior = rssm.obs_step_by_prior(
-    clone_state(prev_post), now_prior, action_seq.clone(), embed_seq, is_first_zero_seq, sample=False
+    clone_state(prev_post), now_prior, action.clone(), embed, is_first_zero, sample=False
 )
 assert_unchanged(before_post, prev_post, "obs_step_by_prior (in-place prev_post mutation)")
 
 # --- Test 4: obs_step_by_prior, mixed is_first, no crash ---
 _ = rssm.obs_step_by_prior(
-    clone_state(prev_post), now_prior, action_seq.clone(), embed_seq, is_first_mixed_seq, sample=False
+    clone_state(prev_post), now_prior, action.clone(), embed, is_first_mixed, sample=False
 )
 print("[PASS] obs_step_by_prior: mixed is_first ran without error")
 
