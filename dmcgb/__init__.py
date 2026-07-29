@@ -17,12 +17,17 @@ def make(
         is_sensor_cs=None,
         distracting_cs_intensity=None,
         background_dataset_paths=None,
+        background_dataset_videos=None,
         environment_kwargs=None,
         setting_kwargs=None,
         time_limit=None,
 ):
     if is_distracting_cs or is_sensor_cs:
-        env_id = 'dmc_%s_%s-%s-v1' % (domain_name, task_name, 'dcs')
+        # background_dataset_videos ('train'/'val') must be part of the id: gym's registry
+        # only honors the kwargs passed on the FIRST registration of a given id, so train and
+        # eval envs (which reuse the same domain/task) need distinct ids or eval silently
+        # inherits train's kwargs (including the video pool).
+        env_id = 'dmc_%s_%s-%s-%s-v1' % (domain_name, task_name, 'dcs', background_dataset_videos or 'train')
     else:
         env_id = 'dmc_%s_%s-v1' % (domain_name, task_name)
 
@@ -58,6 +63,7 @@ def make(
                 is_sensor_cs=is_sensor_cs,
                 distracting_cs_intensity=distracting_cs_intensity,
                 background_dataset_paths=background_dataset_paths,
+                background_dataset_videos=background_dataset_videos,
             ),
             max_episode_steps=max_episode_steps,
         )

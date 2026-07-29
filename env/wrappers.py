@@ -20,10 +20,16 @@ def make_env(
 		mode='train',
 		intensity=0.,
   		ds_resource_path=None,
+		env_split='train',
 	):
 	"""Make environment for experiments"""
 	assert mode in {'train', 'color_easy', 'color_hard', 'video_easy', 'video_hard', 'distracting_cs', 'sensor_cs'}, \
 		f'specified mode "{mode}" is not supported'
+	assert env_split in {'train', 'eval'}, f'specified env_split "{env_split}" is not supported'
+
+	# For the DCS pipeline, distinguish which DAVIS video pool (train vs val) backs the
+	# background distraction, so eval doesn't silently reuse the training videos.
+	background_dataset_videos = 'train' if env_split == 'train' else 'val'
 
 	paths = []
 	is_distracting_cs = mode == 'distracting_cs'
@@ -49,7 +55,8 @@ def make_env(
 		is_distracting_cs=is_distracting_cs,
 		is_sensor_cs=is_sensor_cs,
 		distracting_cs_intensity=intensity,
-		background_dataset_paths=paths
+		background_dataset_paths=paths,
+		background_dataset_videos=background_dataset_videos,
 	)
 	if not is_distracting_cs and not is_sensor_cs:
 		env = VideoWrapper(env, mode, seed)

@@ -214,7 +214,11 @@ def make_env(config, mode):
             domain, task = task[:-len(train_mode) - 1].split("_", 1)
             import env.wrappers
             assert config.size[0] == config.size[1]
-            env = env.wrappers.make_env(domain_name=domain, task_name=task, seed=config.seed, action_repeat=config.action_repeat, image_size=config.size[0], mode=train_mode, intensity=config.distracting_cs_intensity, ds_resource_path=[config.ds_resource_path])
+            # `mode` here is the outer train/eval selector (see make_env's caller); it must NOT be
+            # confused with `train_mode` above, which is the distraction-type string parsed from
+            # the task name. Threaded through as env_split so eval envs draw DAVIS val videos.
+            env_split = "train" if mode == "train" else "eval"
+            env = env.wrappers.make_env(domain_name=domain, task_name=task, seed=config.seed, action_repeat=config.action_repeat, image_size=config.size[0], mode=train_mode, intensity=config.distracting_cs_intensity, ds_resource_path=[config.ds_resource_path], env_split=env_split)
             env = wrappers.DMC2GYMWrapper(env)
         elif task.split("_")[-1] == "video":
             task = "_".join(task.split("_")[:-1])

@@ -50,6 +50,7 @@ class DMCWrapper(core.Env):
         is_sensor_cs=None,
         distracting_cs_intensity=None,
         background_dataset_paths=None,
+        background_dataset_videos=None,
         environment_kwargs=None,
         setting_kwargs=None,
     ):
@@ -66,10 +67,15 @@ class DMCWrapper(core.Env):
         self._is_distracting_cs = is_distracting_cs
         self._distracting_cs_intensity = distracting_cs_intensity
         self._background_dataset_paths = background_dataset_paths
+        self._background_dataset_videos = background_dataset_videos or 'train'
 
         # create task
         if is_distracting_cs:
             from env.distracting_control import suite as dc_suite
+            print(
+                f"[DCS] constructing {domain_name}_{task_name}: "
+                f"background_dataset_videos={self._background_dataset_videos!r}"
+            )
             self._env = dc_suite.load(
                 domain_name,
                 task_name,
@@ -78,7 +84,8 @@ class DMCWrapper(core.Env):
                 environment_kwargs=environment_kwargs,
                 difficulty=distracting_cs_intensity,
                 dynamic=True,
-                background_dataset_paths=background_dataset_paths
+                background_dataset_paths=background_dataset_paths,
+                background_dataset_videos=self._background_dataset_videos,
             )
         elif is_sensor_cs:
             from env.sensor_control import suite as sc_suite

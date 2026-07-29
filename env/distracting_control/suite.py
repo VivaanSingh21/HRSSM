@@ -110,8 +110,11 @@ def load(domain_name,
       environment_kwargs=environment_kwargs,
       visualize_reward=visualize_reward)
 
+  applied_distractions = []
+
   # Apply background distractions.
   if difficulty:
+    applied_distractions.append("background")
     final_background_kwargs = dict()
     num_videos = suite_utils.DIFFICULTY_NUM_VIDEOS[str(difficulty)]
     final_background_kwargs.update(
@@ -125,6 +128,7 @@ def load(domain_name,
 
   # Apply camera distractions.
   if difficulty:
+    applied_distractions.append("camera")
     final_camera_kwargs = dict(camera_id=render_kwargs["camera_id"])
     final_camera_kwargs.update(
         suite_utils.get_camera_kwargs(domain_name, difficulty, dynamic))
@@ -135,12 +139,22 @@ def load(domain_name,
 
   # Apply color distractions.
   if difficulty:
+    applied_distractions.append("color")
     final_color_kwargs = dict()
     final_color_kwargs.update(suite_utils.get_color_kwargs(difficulty, dynamic))
     if color_kwargs:
       # Overwrite kwargs with those passed here.
       final_color_kwargs.update(color_kwargs)
     env = color.DistractingColorEnv(env, **final_color_kwargs)
+
+  print(
+      f"[DCS] {domain_name}_{task_name}: difficulty={difficulty} dynamic={dynamic} "
+      f"applied_distractions={tuple(applied_distractions)}"
+  )
+  if difficulty:
+    print(f"[DCS]   background_kwargs (runtime)={final_background_kwargs}")
+    print(f"[DCS]   camera_kwargs (runtime)={final_camera_kwargs}")
+    print(f"[DCS]   color_kwargs (runtime)={final_color_kwargs}")
 
   # Apply Pixel wrapper after distractions. This is needed to ensure the
   # changes from the distraction wrapper are applied to the MuJoCo environment

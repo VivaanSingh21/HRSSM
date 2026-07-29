@@ -150,6 +150,16 @@ class DistractingBackgroundEnv(control.Environment):
         video_paths = video_paths[:num_videos]
 
       self._video_paths = video_paths
+      # `video_paths` above is only ever checked for being a non-empty list of *strings*
+      # (os.path.join always succeeds) -- it is never checked against the filesystem. A
+      # DAVIS root that exists but is missing/incomplete for specific video subdirs would
+      # pass silently up to this point, so log actual jpg counts per resolved path.
+      jpg_counts = [(p, len(listdir(p))) for p in self._video_paths]
+      print(f"[DCS background] resolved {len(self._video_paths)} video path(s): {self._video_paths}")
+      print(f"[DCS background] jpg counts per path: {jpg_counts}")
+      empty = [p for p, n in jpg_counts if n == 0]
+      if empty:
+        print(f"[DCS background] WARNING: {len(empty)} resolved path(s) have zero jpg files: {empty}")
 
   def reset(self):
     """Reset the background state."""
