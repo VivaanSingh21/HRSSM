@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import functools
 import os
 import pathlib
@@ -340,14 +341,68 @@ def main(config):
         config.videodir.mkdir(parents=True, exist_ok=True)
     step = count_steps(config.traindir)
     # step in logger is environmental step
-    logger = tools.SimpleLogger(logdir, config.action_repeat * step) if config.simple_log else tools.FullLogger(logdir, config.videodir, config.action_repeat * step)
+    logger = (
+        tools.SimpleLogger(logdir, config.action_repeat * step, use_wandb=config.use_wandb, action_repeat=config.action_repeat)
+        if config.simple_log
+        else tools.FullLogger(logdir, config.videodir, config.action_repeat * step, use_wandb=config.use_wandb, action_repeat=config.action_repeat)
+    )
 
     print("Create envs.")
     train_eps = collections.OrderedDict()
     eval_eps = collections.OrderedDict()
     make = lambda mode: make_env(config, mode)
-    train_envs = [make("train") for _ in range(config.envs)]
-    eval_envs = [make("eval") for _ in range(config.envs)]
+
+    # Capture the resolved DCS settings (which video split, which distraction types actually
+    # fired, resolved video paths) straight from the [DCS] logs emitted during the REAL
+    # gym.make() construction below -- not re-derived -- so a wandb run is self-auditable
+    # without needing this repo's stdout scrollback to trust it. Only relevant for DCS tasks.
+    is_dcs_task = config.use_wandb and "_distracting_cs" in config.task
+    dcs_wandb_config = {}
+    if is_dcs_task:
+        from verify_dcs_setup import Tee, parse_dcs_log
+
+        tee = Tee(sys.stdout)
+        with contextlib.redirect_stdout(tee):
+            train_envs = [make("train") for _ in range(config.envs)]
+        train_dcs_info = parse_dcs_log(tee.getvalue())
+
+        tee = Tee(sys.stdout)
+        with contextlib.redirect_stdout(tee):
+            eval_envs = [make("eval") for _ in range(config.envs)]
+        eval_dcs_info = parse_dcs_log(tee.getvalue())
+
+        for split, info in (("train", train_dcs_info), ("eval", eval_dcs_info)):
+            dcs_wandb_config[f"dcs_{split}_background_dataset_videos"] = info.get("background_dataset_videos")
+            dcs_wandb_config[f"dcs_{split}_video_paths"] = info.get("video_paths")
+            dcs_wandb_config[f"dcs_{split}_applied_distractions"] = list(info.get("applied_distractions") or [])
+    else:
+        train_envs = [make("train") for _ in range(config.envs)]
+        eval_envs = [make("eval") for _ in range(config.envs)]
+
+    if config.use_wandb:
+        import wandb
+
+        # By this point config.traindir/evaldir/videodir have been reassigned to pathlib.Path
+        # objects (see above) -- stringify everything path-like so wandb's config serialization
+        # doesn't choke on non-primitive values.
+        serializable_config = {
+            k: (str(v) if isinstance(v, pathlib.Path) else v) for k, v in vars(config).items()
+        }
+        wandb.init(
+            project=config.wandb_project,
+            entity=config.wandb_entity,
+            name=config.wandb_run_name or logdir.name,
+            config={
+                **serializable_config,
+                **dcs_wandb_config,
+                # HRSSM's eval policy (dreamer.py _policy, `if not training: action = actor.mode()`)
+                # is always deterministic with eval_noise=0 -- there is no separate stochastic
+                # eval metric to choose between, unlike VIBES which logs both.
+                "eval_policy_type": "deterministic (actor.mode(), eval_noise=0)",
+                "wandb_x_axis_convention": "env steps = post-action-repeat control steps (CoRe/VIBES convention), NOT raw MuJoCo ticks",
+            },
+        )
+
     if config.parallel:
         train_envs = [Parallel(env, "process") for env in train_envs]
         eval_envs = [Parallel(env, "process") for env in eval_envs]
@@ -448,6 +503,10 @@ def main(config):
             env.close()
         except Exception:
             pass
+    if config.use_wandb:
+        import wandb
+
+        wandb.finish()
 
 
 if __name__ == "__main__":
@@ -487,4 +546,8 @@ if __name__ == "__main__":
     parser.add_argument('--nosimsr', action='store_true')
     parser.add_argument('--post_mlr', action='store_true')
     parser.add_argument('--profile_train', action='store_true')
+    parser.add_argument('--use_wandb', action='store_true')
+    parser.add_argument('--wandb_project', default='hrssm-dcs', type=str)
+    parser.add_argument('--wandb_entity', default=None, type=str)
+    parser.add_argument('--wandb_run_name', default=None, type=str)
     main(parser.parse_args(remaining))

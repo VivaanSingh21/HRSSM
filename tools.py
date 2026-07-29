@@ -57,7 +57,7 @@ class TimeRecording:
 
 
 class SimpleLogger:
-    def __init__(self, logdir, step):
+    def __init__(self, logdir, step, use_wandb=False, action_repeat=1):
         self._start_time = time.time()
         self._logdir = logdir
         # self._writer = SummaryWriter(log_dir=str(logdir), max_queue=1000)
@@ -68,6 +68,8 @@ class SimpleLogger:
         # self._videos = {}
         self.step = step
         self.full_log = False
+        self._use_wandb = use_wandb
+        self._action_repeat = action_repeat
 
     def scalar(self, name, value):
         self._scalars[name] = float(value)
@@ -89,6 +91,14 @@ class SimpleLogger:
         print(f"[{step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
         with (self._logdir / "metrics.jsonl").open("a") as f:
             f.write(json.dumps({"step": step, **dict(scalars)}) + "\n")
+        if self._use_wandb:
+            import wandb
+
+            # `step` here is the raw (pre-action-repeat) env-step count -- see the
+            # `logger.step = action_repeat * self._step` line in Dreamer.__call__. Divide back
+            # out so the wandb x-axis is CoRe/VIBES' post-action-repeat "environment steps"
+            # convention (uniform across tasks regardless of action_repeat), not raw ticks.
+            wandb.log(dict(scalars), step=int(step // self._action_repeat))
         # for name, value in scalars:
         #     if "/" not in name:
         #         self._writer.add_scalar("scalars/" + name, value, step)
@@ -132,7 +142,7 @@ class SimpleLogger:
 
 
 class FullLogger:
-    def __init__(self, logdir, videodir, step):
+    def __init__(self, logdir, videodir, step, use_wandb=False, action_repeat=1):
         self._start_time = time.time()
         self._logdir = logdir
         self._videodir = videodir
@@ -145,6 +155,8 @@ class FullLogger:
         self.step = step
         self.full_log = True
         self._all_videos = {}
+        self._use_wandb = use_wandb
+        self._action_repeat = action_repeat
 
     def scalar(self, name, value):
         self._scalars[name] = float(value)
@@ -165,6 +177,12 @@ class FullLogger:
         print(f"[{step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
         with (self._logdir / "metrics.jsonl").open("a") as f:
             f.write(json.dumps({"step": step, **dict(scalars)}) + "\n")
+        if self._use_wandb:
+            import wandb
+
+            # See the matching comment in SimpleLogger.write() -- dividing raw step back out
+            # by action_repeat gives the CoRe/VIBES "environment steps" convention.
+            wandb.log(dict(scalars), step=int(step // self._action_repeat))
         for name, value in scalars:
             if "/" not in name:
                 self._writer.add_scalar("scalars/" + name, value, step)
