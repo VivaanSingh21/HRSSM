@@ -22,7 +22,10 @@ import os
 import re
 import sys
 
-os.environ.setdefault("MUJOCO_GL", "osmesa")
+# Hard override, not setdefault -- PYOPENGL_PLATFORM is pre-set to 'osmesa' at the
+# container/shell level on canebrake, so setdefault would silently no-op against it.
+os.environ["MUJOCO_GL"] = "egl"
+os.environ["PYOPENGL_PLATFORM"] = "egl"
 
 import numpy as np
 

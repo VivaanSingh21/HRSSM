@@ -6,7 +6,12 @@ import sys
 import json
 import time
 
-os.environ.setdefault("MUJOCO_GL", "osmesa")
+# Force EGL (GPU-accelerated) rendering, not OSMesa (CPU software rendering). This is a
+# hard override, not setdefault: PYOPENGL_PLATFORM is set to 'osmesa' at the container/shell
+# level on canebrake (Dockerfile/.bashrc), so setdefault would silently no-op against it --
+# confirmed EGL works cleanly in this container (verify_dcs_setup.py, 2026-07-29).
+os.environ["MUJOCO_GL"] = "egl"
+os.environ["PYOPENGL_PLATFORM"] = "egl"
 
 import numpy as np
 import ruamel.yaml as yaml
