@@ -14,6 +14,26 @@ import time
 os.environ["MUJOCO_GL"] = "egl"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
+# Pin the EGL render context to the same physical GPU as --device, before dm_control gets
+# imported (transitively, below) -- dm_control's egl_renderer.py picks its rendering GPU
+# from CUDA_VISIBLE_DEVICES exactly once, at import time, and falls back to whichever
+# device EGL enumerates first (always GPU0) if that var is unset. --device alone only
+# steers PyTorch's compute placement, not EGL's, so without this every concurrent run's
+# rendering piles onto GPU0 regardless of --device (RUNTIME_CHALLENGES.md). Skipped if
+# CUDA_VISIBLE_DEVICES is already set by the launcher -- that already handles both.
+if "CUDA_VISIBLE_DEVICES" not in os.environ:
+    for _i, _arg in enumerate(sys.argv):
+        _gpu_idx = None
+        if _arg == "--device" and _i + 1 < len(sys.argv) and sys.argv[_i + 1].startswith("cuda:"):
+            _gpu_idx = sys.argv[_i + 1].split(":", 1)[1]
+            sys.argv[_i + 1] = "cuda:0"
+        elif _arg.startswith("--device=cuda:"):
+            _gpu_idx = _arg.split(":", 1)[1]
+            sys.argv[_i] = "--device=cuda:0"
+        if _gpu_idx is not None:
+            os.environ["CUDA_VISIBLE_DEVICES"] = _gpu_idx
+            break
+
 import numpy as np
 import ruamel.yaml as yaml
 
@@ -340,6 +360,15 @@ def main(config):
     if not config.simple_log:
         config.videodir.mkdir(parents=True, exist_ok=True)
     step = count_steps(config.traindir)
+    checkpoint_path = logdir / "latest.pt"
+    resume_checkpoint = None
+    if checkpoint_path.exists():
+        resume_checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        # episodes are never written to disk (see tools.save_episodes, disabled), so
+        # count_steps(traindir) always reads 0 -- the checkpoint's own step count is
+        # the only source of truth for how far a resumed run had actually gotten.
+        step = resume_checkpoint["step"]
+        print(f"Resuming from {checkpoint_path} at step {step}.")
     # step in logger is environmental step
     logger = (
         tools.SimpleLogger(logdir, config.action_repeat * step, use_wandb=config.use_wandb, action_repeat=config.action_repeat)
@@ -457,11 +486,10 @@ def main(config):
         train_dataset,
     ).to(config.device)
     agent.requires_grad_(requires_grad=False)
-    # if (logdir / "latest.pt").exists():
-    #     checkpoint = torch.load(logdir / "latest.pt")
-    #     agent.load_state_dict(checkpoint["agent_state_dict"])
-    #     tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
-    #     agent._should_pretrain._once = False
+    if resume_checkpoint is not None:
+        agent.load_state_dict(resume_checkpoint["agent_state_dict"])
+        tools.recursively_load_optim_state_dict(agent, resume_checkpoint["optims_state_dict"])
+        agent._should_pretrain._once = False
 
     # make sure eval will be executed once after config.steps
     while agent._step < config.steps + config.eval_every:
@@ -481,6 +509,12 @@ def main(config):
             if config.video_pred_log:
                 video_pred = agent._wm.video_pred(next(eval_dataset))
                 logger.video("eval_openl", to_np(video_pred))
+            # erase_over_episodes() only runs for the train cache (tools.simulate,
+            # is_eval=False) -- eval_eps is otherwise never trimmed and grows for the
+            # entire run's lifetime. This was the root cause of the OOM kills (see
+            # RUNTIME_CHALLENGES.md): ~25,000 env-steps of image data retained forever
+            # per eval cycle. Nothing needs eval episodes to persist across cycles.
+            eval_eps.clear()
         print("Start training.")
         state = tools.simulate(
             agent,
@@ -492,12 +526,14 @@ def main(config):
             steps=config.eval_every,
             state=state,
         )
-        # items_to_save = {
-        #     "agent_state_dict": agent.state_dict(),
-        #     "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
-        # }
-        # if logger.full_log:
-        torch.save(agent.state_dict(), logdir / "latest.pt")
+        torch.save(
+            {
+                "step": agent._step,
+                "agent_state_dict": agent.state_dict(),
+                "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
+            },
+            logdir / "latest.pt",
+        )
     for env in train_envs + eval_envs:
         try:
             env.close()
