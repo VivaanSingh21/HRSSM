@@ -567,6 +567,23 @@ class SampleDist:
 
 class OneHotDist(torchd.one_hot_categorical.OneHotCategorical):
     def __init__(self, logits=None, probs=None, unimix_ratio=0.0):
+        if logits is not None and not torch.isfinite(logits).all():
+            # Every discrete stochastic sample in the codebase (mask + EMA
+            # dynamics, actor action dist) goes through here. A non-finite logit
+            # reaching torch.multinomial's CUDA kernel is undefined behavior --
+            # nondeterministically a clean RuntimeError, a raw CUDA "unspecified
+            # launch failure", or a segfault, depending on exactly where it lands.
+            # Sanitizing here catches it regardless of which upstream computation
+            # produced the bad value. Zeroing gives a uniform distribution over
+            # classes for that one timestep -- an honest "unknown, sample
+            # randomly" fallback, not a fabricated result. Traced from the
+            # finger_spin_dcs crashes -- see RUNTIME_CHALLENGES.md.
+            n_bad = (~torch.isfinite(logits)).sum().item()
+            print(
+                f"[OneHotDist] WARNING: {n_bad}/{logits.numel()} non-finite logit "
+                f"values, replacing with 0 before sampling."
+            )
+            logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
         if logits is not None and unimix_ratio > 0.0:
             probs = F.softmax(logits, dim=-1)
             probs = probs * (1.0 - unimix_ratio) + unimix_ratio / probs.shape[-1]
