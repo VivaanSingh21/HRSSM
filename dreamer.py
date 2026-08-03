@@ -493,11 +493,23 @@ def main(config):
         tools.recursively_load_optim_state_dict(agent, resume_checkpoint["optims_state_dict"])
         agent._should_pretrain._once = False
 
+    # VIBES-style split: cheap eval_episode_num-sized evals at periodic checkpoints, a
+    # larger n_final_eval_eps-sized eval only on the last checkpoint (unset --n_eval_eps/
+    # --n_final_eval_eps falls back to config.eval_episode_num for both, so profiles that
+    # never set these two flags -- minecraft's eval_episode_num=0, mydebug's =1, etc. --
+    # behave exactly as before).
+    n_eval_eps = config.n_eval_eps if config.n_eval_eps is not None else config.eval_episode_num
+    n_final_eval_eps = (
+        config.n_final_eval_eps if config.n_final_eval_eps is not None else config.eval_episode_num
+    )
+
     # make sure eval will be executed once after config.steps
     while agent._step < config.steps + config.eval_every:
         logger.write()
-        if config.eval_episode_num > 0:
-            print("Start evaluation.")
+        is_final_eval = agent._step >= config.steps
+        this_eval_episode_num = n_final_eval_eps if is_final_eval else n_eval_eps
+        if this_eval_episode_num > 0:
+            print(f"Start evaluation{' (final)' if is_final_eval else ''}.")
             eval_policy = functools.partial(agent, training=False)
             tools.simulate(
                 eval_policy,
@@ -506,7 +518,7 @@ def main(config):
                 config.evaldir,
                 logger,
                 is_eval=True,
-                episodes=config.eval_episode_num,
+                episodes=this_eval_episode_num,
             )
             if config.video_pred_log:
                 video_pred = agent._wm.video_pred(next(eval_dataset))
@@ -589,4 +601,6 @@ if __name__ == "__main__":
     parser.add_argument('--wandb_entity', default=None, type=str)
     parser.add_argument('--wandb_run_name', default=None, type=str)
     parser.add_argument('--wandb_resume_id', default=None, type=str)
+    parser.add_argument('--n_eval_eps', default=None, type=int)
+    parser.add_argument('--n_final_eval_eps', default=None, type=int)
     main(parser.parse_args(remaining))
