@@ -421,6 +421,8 @@ def main(config):
             project=config.wandb_project,
             entity=config.wandb_entity,
             name=config.wandb_run_name or logdir.name,
+            id=config.wandb_resume_id or None,
+            resume="must" if config.wandb_resume_id else None,
             config={
                 **serializable_config,
                 **dcs_wandb_config,
@@ -586,4 +588,5 @@ if __name__ == "__main__":
     parser.add_argument('--wandb_project', default='hrssm-dcs', type=str)
     parser.add_argument('--wandb_entity', default=None, type=str)
     parser.add_argument('--wandb_run_name', default=None, type=str)
+    parser.add_argument('--wandb_resume_id', default=None, type=str)
     main(parser.parse_args(remaining))
