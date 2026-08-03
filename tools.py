@@ -892,20 +892,7 @@ class Optimizer:
         norm = torch.nn.utils.clip_grad_norm_(params, self._clip)
         if self._wd:
             self._apply_weight_decay(params)
-        if torch.isfinite(norm):
-            self._scaler.step(self._opt)
-        else:
-            # clip_grad_norm_ can only cap large-but-finite gradients, not rescue
-            # already-nan/inf ones. GradScaler normally skips the step itself when
-            # it sees non-finite grads, but only if AMP is actually enabled
-            # (self._scaler is a no-op passthrough otherwise) -- and every task
-            # here runs with config.precision=32, i.e. AMP disabled. Without this
-            # guard, a single non-finite loss permanently corrupts this network's
-            # weights, which for the world model then permanently poisons
-            # target_dynamics/target_encoder on the very next soft_update_params
-            # EMA blend (they're never retrained from scratch). Traced from the
-            # finger_spin_dcs crashes in obs_step_by_prior -- see RUNTIME_CHALLENGES.md.
-            print(f"[Optimizer:{self._name}] WARNING: non-finite grad norm ({norm.item()}), skipping this step.")
+        self._scaler.step(self._opt)
         self._scaler.update()
         # self._opt.step()
         self._opt.zero_grad()

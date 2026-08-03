@@ -215,20 +215,7 @@ class RewardEMA(object):
     def __call__(self, x):
         flat_x = torch.flatten(x.detach())
         x_quantile = torch.quantile(input=flat_x, q=self.range)
-        if torch.isfinite(x_quantile).all():
-            self.values = self.alpha * x_quantile + (1 - self.alpha) * self.values
-        else:
-            # self.values is an EMA carried across the rest of training -- a single
-            # non-finite quantile here would poison it permanently (torch.clip
-            # below can't rescue an already-nan value). Skip the update and keep
-            # the last good values instead. Same class of risk as the
-            # target_dynamics EMA poisoning fixed in tools.Optimizer, found
-            # while tracing the finger_spin_dcs crashes -- see RUNTIME_CHALLENGES.md.
-            print(
-                f"[RewardEMA] WARNING: non-finite quantile from input with "
-                f"{(~torch.isfinite(flat_x)).sum().item()}/{flat_x.numel()} "
-                f"non-finite values. Skipping this EMA update."
-            )
+        self.values = self.alpha * x_quantile + (1 - self.alpha) * self.values
         scale = torch.clip(self.values[1] - self.values[0], min=1.0)
         offset = self.values[0]
         return offset.detach(), scale.detach()
@@ -444,16 +431,6 @@ class WorldModel(nn.Module):
                 if not self._config.nosimsr:
                     losses['simsr'] = self.update_SimSR(feat, true_post_feat, prior_feat, true_prior_feat, data) * self._scales.get("simsr", 1.0)
                 model_loss = sum(losses.values()) + kl_loss
-                if not torch.isfinite(model_loss):
-                    bad_terms = [
-                        name
-                        for name, val in {"kl_loss": kl_loss, **losses}.items()
-                        if not torch.isfinite(val).all()
-                    ]
-                    print(
-                        f"[WorldModel._train] WARNING: non-finite model_loss "
-                        f"({model_loss.item()}); non-finite term(s): {bad_terms}"
-                    )
             metrics = self._model_opt(model_loss, self.parameters())
 
         metrics.update({f"{name}_loss": to_np(loss) for name, loss in losses.items()})
