@@ -894,9 +894,7 @@ class Optimizer:
             self._apply_weight_decay(params)
         if torch.isfinite(norm):
             self._scaler.step(self._opt)
-            metrics[f"{self._name}_nonfinite_skip"] = 0.0
         else:
-            metrics[f"{self._name}_nonfinite_skip"] = 1.0
             # clip_grad_norm_ can only cap large-but-finite gradients, not rescue
             # already-nan/inf ones. GradScaler normally skips the step itself when
             # it sees non-finite grads, but only if AMP is actually enabled
