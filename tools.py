@@ -336,7 +336,6 @@ def simulate(
             indices = [index for index, d in enumerate(done) if d]
             # logging for done episode
             for i in indices:
-                # save_episodes(directory, {envs[i].id: cache[envs[i].id]})
                 length = len(cache[envs[i].id]["reward"]) - 1
                 score = float(np.array(cache[envs[i].id]["reward"]).sum())
                 success = float(np.array(cache[envs[i].id]["success"][-1]))
@@ -353,7 +352,13 @@ def simulate(
                             cache[envs[i].id].pop(key)
 
                 if not is_eval:
-                    step_in_dataset = erase_over_episodes(cache, limit)
+                    # Persist the completed episode to disk (one small incremental write per
+                    # episode, using data already resident in `cache` -- not a periodic dump of
+                    # the whole buffer) so a crash/resume doesn't lose the replay buffer the way
+                    # it silently did before: dreamer.py's checkpoint only ever restored model +
+                    # optimizer state, never train_eps, so every resume started from a cold buffer.
+                    save_episodes(directory, {envs[i].id: cache[envs[i].id]})
+                    step_in_dataset = erase_over_episodes(cache, limit, directory=directory)
                     logger.scalar(f"train_return", score)
                     logger.scalar(f"train_success", success)
                     logger.scalar(f"dataset_size", step_in_dataset)
@@ -407,7 +412,7 @@ def add_to_cache(cache, id, transition):
                 cache[id][key].append(convert(val))
 
 
-def erase_over_episodes(cache, dataset_size):
+def erase_over_episodes(cache, dataset_size, directory=None):
     step_in_dataset = 0
     for key, ep in reversed(sorted(cache.items(), key=lambda x: x[0])):
         if (
@@ -417,6 +422,13 @@ def erase_over_episodes(cache, dataset_size):
             step_in_dataset += len(ep["reward"]) - 1
         else:
             del cache[key]
+            # Keep on-disk episodes (see save_episodes) in sync with the RAM eviction --
+            # otherwise disk grows unbounded even though RAM stays capped at dataset_size,
+            # the same failure mode this cap exists to prevent, just moved to a different
+            # resource. Glob on the key prefix since the length suffix isn't known here.
+            if directory is not None:
+                for f in pathlib.Path(directory).expanduser().glob(f"{key}-*.npz"):
+                    f.unlink()
     return step_in_dataset
 
 
@@ -435,18 +447,18 @@ def convert(value, precision=32):
     return value.astype(dtype)
 
 
-# def save_episodes(directory, episodes):
-#     directory = pathlib.Path(directory).expanduser()
-#     directory.mkdir(parents=True, exist_ok=True)
-#     for filename, episode in episodes.items():
-#         length = len(episode["reward"])
-#         filename = directory / f"{filename}-{length}.npz"
-#         with io.BytesIO() as f1:
-#             np.savez_compressed(f1, **episode)
-#             f1.seek(0)
-#             with filename.open("wb") as f2:
-#                 f2.write(f1.read())
-#     return True
+def save_episodes(directory, episodes):
+    directory = pathlib.Path(directory).expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    for filename, episode in episodes.items():
+        length = len(episode["reward"])
+        filename = directory / f"{filename}-{length}.npz"
+        with io.BytesIO() as f1:
+            np.savez_compressed(f1, **episode)
+            f1.seek(0)
+            with filename.open("wb") as f2:
+                f2.write(f1.read())
+    return True
 
 
 def from_generator(generator, batch_size):
@@ -504,38 +516,34 @@ def sample_episodes(episodes, length, seed=0):
         yield ret
 
 
-# def load_episodes(directory, limit=None, reverse=True):
-#     directory = pathlib.Path(directory).expanduser()
-#     episodes = collections.OrderedDict()
-#     total = 0
-#     if reverse:
-#         for filename in reversed(sorted(directory.glob("*.npz"))):
-#             try:
-#                 with filename.open("rb") as f:
-#                     episode = np.load(f)
-#                     episode = {k: episode[k] for k in episode.keys()}
-#             except Exception as e:
-#                 print(f"Could not load episode: {e}")
-#                 continue
-#             # extract only filename without extension
-#             episodes[str(os.path.splitext(os.path.basename(filename))[0])] = episode
-#             total += len(episode["reward"]) - 1
-#             if limit and total >= limit:
-#                 break
-#     else:
-#         for filename in sorted(directory.glob("*.npz")):
-#             try:
-#                 with filename.open("rb") as f:
-#                     episode = np.load(f)
-#                     episode = {k: episode[k] for k in episode.keys()}
-#             except Exception as e:
-#                 print(f"Could not load episode: {e}")
-#                 continue
-#             episodes[str(filename)] = episode
-#             total += len(episode["reward"]) - 1
-#             if limit and total >= limit:
-#                 break
-#     return episodes
+def load_episodes(directory, limit=None, reverse=True):
+    directory = pathlib.Path(directory).expanduser()
+    episodes = collections.OrderedDict()
+    total = 0
+    filenames = sorted(directory.glob("*.npz"))
+    if reverse:
+        filenames = list(reversed(filenames))
+    for filename in filenames:
+        try:
+            with filename.open("rb") as f:
+                episode = np.load(f)
+                episode = {k: episode[k] for k in episode.keys()}
+        except Exception as e:
+            print(f"Could not load episode: {e}")
+            continue
+        # Filenames are "{key}-{length}.npz" (see save_episodes) -- strip both the extension
+        # and the trailing length suffix so the restored key matches the live env.id exactly.
+        # erase_over_episodes' disk-eviction glob (f"{key}-*.npz") depends on this: if a
+        # reloaded episode's key still had "-{length}" baked in, that glob would look for
+        # "{key}-{length}-*.npz" and never match the real "{key}-{length}.npz" file, leaking
+        # it on disk forever once evicted.
+        stem = os.path.splitext(os.path.basename(filename))[0]
+        key = stem.rsplit("-", 1)[0]
+        episodes[key] = episode
+        total += len(episode["reward"]) - 1
+        if limit and total >= limit:
+            break
+    return episodes
 
 
 class SampleDist:

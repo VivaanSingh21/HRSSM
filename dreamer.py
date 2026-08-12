@@ -3,6 +3,7 @@ import contextlib
 import functools
 import os
 import pathlib
+import shutil
 import sys
 import json
 import time
@@ -364,9 +365,9 @@ def main(config):
     resume_checkpoint = None
     if checkpoint_path.exists():
         resume_checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        # episodes are never written to disk (see tools.save_episodes, disabled), so
-        # count_steps(traindir) always reads 0 -- the checkpoint's own step count is
-        # the only source of truth for how far a resumed run had actually gotten.
+        # The checkpoint's own step count is the source of truth for how far a resumed run
+        # had actually gotten -- count_steps(traindir) above is a fallback for the (rare)
+        # case traindir has episodes on disk but no matching checkpoint.
         step = resume_checkpoint["step"]
         print(f"Resuming from {checkpoint_path} at step {step}.")
     # step in logger is environmental step
@@ -377,7 +378,17 @@ def main(config):
     )
 
     print("Create envs.")
-    train_eps = collections.OrderedDict()
+    if resume_checkpoint is not None:
+        # Restore the replay buffer from the per-episode .npz files tools.simulate() has been
+        # writing to config.traindir (see tools.save_episodes) -- without this, resuming only
+        # restored model+optimizer state and train_eps started empty every time, silently
+        # cold-starting the buffer on every resume (this is almost certainly why resumed runs
+        # showed a visible eval_return dip -- the model resumed, the data it trained on didn't).
+        train_eps = tools.load_episodes(config.traindir, limit=config.dataset_size)
+        loaded_transitions = sum(len(ep["reward"]) - 1 for ep in train_eps.values())
+        print(f"Restored {len(train_eps)} episodes ({loaded_transitions} transitions) from {config.traindir}.")
+    else:
+        train_eps = collections.OrderedDict()
     eval_eps = collections.OrderedDict()
     make = lambda mode: make_env(config, mode)
 
@@ -548,6 +559,17 @@ def main(config):
             },
             logdir / "latest.pt",
         )
+    # Reaching here means the while loop above exited naturally (agent._step reached
+    # config.steps + config.eval_every), i.e. a clean finish -- a crash/kill never gets here,
+    # so the checkpoint + on-disk replay buffer are only ever wiped on success, leaving them
+    # intact for resume whenever they'd actually be needed. Otherwise every successful run
+    # would permanently leave its full replay buffer (~dataset_size * ~12KB/transition, e.g.
+    # ~12GB at the default 1,000,000) sitting on disk for no reason once training is done.
+    print(f"Training complete at step {agent._step}. Removing checkpoint and replay buffer.")
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
+    if config.traindir.exists():
+        shutil.rmtree(config.traindir)
     for env in train_envs + eval_envs:
         try:
             env.close()
