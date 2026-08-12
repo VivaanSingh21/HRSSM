@@ -378,12 +378,14 @@ def main(config):
     )
 
     print("Create envs.")
-    if resume_checkpoint is not None:
-        # Restore the replay buffer from the per-episode .npz files tools.simulate() has been
-        # writing to config.traindir (see tools.save_episodes) -- without this, resuming only
-        # restored model+optimizer state and train_eps started empty every time, silently
-        # cold-starting the buffer on every resume (this is almost certainly why resumed runs
-        # showed a visible eval_return dip -- the model resumed, the data it trained on didn't).
+    # Restore the replay buffer from the per-episode .npz files tools.simulate() has been
+    # writing to config.traindir (see tools.save_episodes) whenever any exist on disk --
+    # deliberately NOT gated on resume_checkpoint (latest.pt) existing. The two are
+    # independent recoverable resources: a crash before the very first checkpoint save
+    # (e.g. mid-prefill, or mid-collection on the very first eval_every cycle) can still
+    # leave real completed episodes on disk with no matching latest.pt yet, and there's no
+    # reason to orphan that data just because the model checkpoint hasn't been written yet.
+    if config.traindir.exists() and any(config.traindir.glob("*.npz")):
         train_eps = tools.load_episodes(config.traindir, limit=config.dataset_size)
         loaded_transitions = sum(len(ep["reward"]) - 1 for ep in train_eps.values())
         print(f"Restored {len(train_eps)} episodes ({loaded_transitions} transitions) from {config.traindir}.")
