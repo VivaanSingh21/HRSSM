@@ -23,7 +23,6 @@ though.
 """
 try:
   from dm_control import suite  # pylint: disable=g-import-not-at-top
-  from dm_control.suite.wrappers import pixels  # pylint: disable=g-import-not-at-top
 except ImportError:
   suite = None
 
@@ -142,13 +141,9 @@ def load(domain_name,
   #     final_color_kwargs.update(color_kwargs)
   #   env = color.DistractingColorEnv(env, **final_color_kwargs)
 
-  # Apply Pixel wrapper after distractions. This is needed to ensure the
-  # changes from the distraction wrapper are applied to the MuJoCo environment
-  # before the rendering occurs.
-  env = pixels.Wrapper(
-      env,
-      pixels_only=pixels_only,
-      render_kwargs=render_kwargs,
-      observation_key=pixels_observation_key)
-
+  # NOTE: deliberately NOT wrapping with pixels.Wrapper here -- see the matching comment in
+  # env/distracting_control/suite.py::load(). dmcgb.wrappers.DMCWrapper (the sole caller of
+  # this load()) already does its own correctly-sized render right after this env.step()/
+  # reset() and adds it under "image", so this wrapper's "pixels" render was a wasted,
+  # oversized (240x320 default vs. the configured size) duplicate on every step.
   return env

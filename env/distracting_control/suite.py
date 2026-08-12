@@ -23,7 +23,6 @@ though.
 """
 try:
   from dm_control import suite  # pylint: disable=g-import-not-at-top
-  from dm_control.suite.wrappers import pixels  # pylint: disable=g-import-not-at-top
 except ImportError:
   suite = None
 
@@ -156,13 +155,13 @@ def load(domain_name,
     print(f"[DCS]   camera_kwargs (runtime)={final_camera_kwargs}")
     print(f"[DCS]   color_kwargs (runtime)={final_color_kwargs}")
 
-  # Apply Pixel wrapper after distractions. This is needed to ensure the
-  # changes from the distraction wrapper are applied to the MuJoCo environment
-  # before the rendering occurs.
-  env = pixels.Wrapper(
-      env,
-      pixels_only=pixels_only,
-      render_kwargs=render_kwargs,
-      observation_key=pixels_observation_key)
-
+  # NOTE: deliberately NOT wrapping with pixels.Wrapper here. Its only job is to render a
+  # frame into an observation key (default "pixels", at mujoco.Physics.render's default
+  # 240x320 since render_kwargs above never sets height/width) -- but dmcgb.wrappers.DMCWrapper
+  # (the sole caller of this load()) already does its own correctly-sized render right after
+  # this env.step()/reset() and adds it under "image", which is the only key the model actually
+  # consumes (configs.yaml cnn_keys='image'). Wrapping here used to render a second, ~19x-larger
+  # duplicate frame every single step for nothing, which was both a wasted render call and (once
+  # cached into the replay buffer) the dominant cause of ~250KB/transition RAM bloat vs. the
+  # ~15KB/transition expected. Just return the distraction-wrapped env directly.
   return env
