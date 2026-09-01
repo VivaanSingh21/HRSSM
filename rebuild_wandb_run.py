@@ -113,7 +113,6 @@ def main():
         entity=args.entity,
         name=args.run_name,
         config=config,
-        settings=wandb.Settings(x_disable_stats=True),
     )
     print(f"Created new run: {run.id}  ({run.url})")
     for s, r in ordered:
